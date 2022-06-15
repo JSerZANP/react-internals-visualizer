@@ -1,0 +1,211 @@
+<html>
+  <body>
+    <script src="https://unpkg.com/react@18.1.0/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18.1.0/umd/react-dom.development.js"></script>
+    <!-- <script src="https://unpkg.com/react@18.1.0/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18.1.0/umd/react-dom.production.min.js"></script> -->
+
+    <script src="https://unpkg.com/babel-standalone@6/babel.js"></script>
+    <div id="container"></div>
+    <script>
+      const fiberTreeRoots = new Set();
+      const fiberMap = new Map();
+
+      const process = (message) => {
+        switch (message.type) {
+          case "create-fiber":
+            // 1. create a new Node in fiberMap Map<UID, node>
+            // 2. put the node in fiberTree
+            const { UID, subType, tag } = message.payload.fiber;
+            const node = {
+              UID,
+              subType,
+              tag,
+            };
+
+            fiberMap.set(UID, node);
+            fiberTreeRoots.add(node);
+            break;
+          case "delete-fiber":
+            console.log("delete fiber");
+            break;
+          case "update-fiber":
+            // 1. if `child` or `sibling` is set , reflect udpates on the fiber, and remove it from fiberTree root
+            // 2. if `child` or `sibling` is set to null, put the previous child or sibilng onto the fiberTree root
+            const property = message.payload.property;
+            switch (property) {
+              case "child": {
+                const childUID = message.payload.value?.UID;
+                const child = fiberMap.get(childUID);
+                const parent = fiberMap.get(message.payload.fiber.UID);
+
+                if (child == null) {
+                  const prevChild = parent.child;
+                  if (prevChild != null) {
+                    // restore it as root
+                    fiberTreeRoots.add(prevChild);
+                  }
+                } else {
+                  fiberTreeRoots.delete(child);
+                }
+                parent.child = child;
+                break;
+              }
+              case "sibling": {
+                const siblingUID = message.payload.value?.UID;
+                const sibling = fiberMap.get(siblingUID);
+                const from = fiberMap.get(message.payload.fiber.UID);
+
+                if (sibling == null) {
+                  const prevSibling = from.sibling;
+                  if (prevSibling != null) {
+                    // restore it as root
+                    fiberTreeRoots.add(prevSibling);
+                  }
+                } else {
+                  fiberTreeRoots.delete(sibling);
+                }
+
+                from.sibling = sibling;
+                break;
+              }
+              // TODO: handle more types, custom component .etc
+              case "elementType":
+              // case "type":
+              case "tag":
+                const target = fiberMap.get(message.payload.fiber.UID);
+                target[property] = message.payload.value;
+                break;
+              default:
+                // TODO
+                break;
+            }
+            break;
+          default:
+            throw new Error("unrecognized message type", message);
+        }
+      };
+
+      const getLabel = (node) => {
+        if (node.subType === "root") return "<Root>";
+        if (node.tag === 3) return "<HostRoot>";
+        return node.elementType || node.type;
+      };
+      const toShapes = () => {
+        const shapes = [];
+
+        const walk = (fiber, pos) => {
+          const label = getLabel(fiber);
+          shapes.push({
+            type: "rectangle",
+            label: label,
+            width: 100,
+            height: 40,
+            pos,
+            key: fiber.UID,
+          });
+
+          if (fiber.child) {
+            walk(fiber.child, { x: pos.x, y: pos.y + 50 });
+          }
+
+          if (fiber.sibling) {
+            walk(fiber.sibling, { x: pos.x + 120, y: pos.y });
+          }
+        };
+
+        const roots = [...fiberTreeRoots];
+        for (let i = 0; i < roots.length; i++) {
+          walk(roots[i], { x: 300 * i, y: 50 });
+        }
+
+        return shapes;
+      };
+    </script>
+    <script type="text/babel">
+      function renderShape(shape) {
+        // TODO: handle more shapes
+        switch (shape.type) {
+          case "rectangle":
+            return [
+              <rect
+                width={shape.width}
+                height={shape.height}
+                x={shape.pos.x}
+                y={shape.pos.y}
+                fill="transparent"
+                stroke="#000"
+                key={shape.key}
+              />,
+              <text
+                x={shape.pos.x + shape.width / 2}
+                y={shape.pos.y + shape.height / 2}
+                textAnchor="middle"
+                fill="#000"
+                key={`${shape.key}-label`}
+              >
+                {shape.label}
+              </text>,
+            ];
+          default:
+            throw new Error("unrecognized shape", shape);
+        }
+      }
+      function Renderer({ shapes }) {
+        if (shapes == null) return null;
+        return (
+          <svg
+            version="1.1"
+            width="1000"
+            height="500"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            {shapes.map(renderShape)}
+          </svg>
+        );
+      }
+
+      const IntervalRenderingSnapshot = 100;
+      function App() {
+        const [snapshots, setSnapshots] = React.useState([]);
+        const snapshotsRef = React.useRef(snapshots);
+        React.useLayoutEffect(() => {
+          snapshotsRef.current = snapshots;
+        }, [snapshots]);
+
+        const [currentSnapshotIndex, setCurrentShapshotIndex] =
+          React.useState(0);
+
+        // 1. hold all the snapshots
+        // 2. keep track of current cursor on the snapshot list
+        // 3. move forward the cursor with internal
+        React.useEffect(() => {
+          window.addEventListener("message", (e) => {
+            const messsage = JSON.parse(e.data);
+            process(messsage);
+            // append the latest snapshot
+            const snapshot = toShapes();
+            setSnapshots((snapshots) => [...snapshots, snapshot]);
+          });
+
+          window.parent.postMessage("visualizer-ready", "*");
+
+          window.setInterval(() => {
+            setCurrentShapshotIndex((index) => {
+              const snapshots = snapshotsRef.current;
+              if (snapshots) {
+                return Math.min(snapshots.length - 1, index + 1);
+              }
+              return index;
+            });
+          }, IntervalRenderingSnapshot);
+        }, []);
+
+        return <Renderer shapes={snapshots[currentSnapshotIndex]} />;
+      }
+
+      const root = ReactDOM.createRoot(document.getElementById("container"));
+      root.render(<App />);
+    </script>
+  </body>
+</html>

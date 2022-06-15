@@ -1,0 +1,48 @@
+<html>
+  <body>
+    <script src="./react.production.js"></script>
+    <script src="./react-dom.production.js"></script>
+    <script src="https://unpkg.com/babel-standalone@6/babel.js"></script>
+    <div id="container"></div>
+    <iframe
+      id="visualizer"
+      src="./visualizer.html"
+      style="
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 70%;
+        width: 100%;
+        border: 0;
+        box-shadow: 1px -1px 7px rgb(0 0 0 / 40%);
+      "
+    ></iframe>
+    <script type="text/babel">
+      window.onmessage = (e) => {
+        if (e.data === "visualizer-ready") {
+          const root = ReactDOM.createRoot(
+            document.getElementById("container")
+          );
+
+          function App() {
+            const [showMore, setShowMore] = React.useState(false);
+            return (
+              <div>
+                <button
+                  onClick={() => {
+                    setShowMore(true);
+                  }}
+                >
+                  click
+                </button>
+                {showMore && <p>more stuff</p>}
+              </div>
+            );
+          }
+          root.render(<App />);
+        }
+      };
+    </script>
+  </body>
+</html>
